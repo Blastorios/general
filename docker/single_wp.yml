@@ -1,0 +1,67 @@
+# Required: Installed Traefik and MySQL
+
+version: '3.8'
+
+networks:
+  # Defining the backend network as 'external' so docker-compose wont create a new version
+  wordpress_backend:
+    external: true
+  # The proxy to connect with traefik
+  proxy:
+    external: true
+
+volumes:
+  wordpress:
+
+services:
+  wordpress:
+    image: wordpress:latest
+    depends_on:
+      - mysql_db
+    environment:
+    # Use the 'wordpress_db_<>' alignment to automate the connection request to the database
+      WORDPRESS_DB_HOST: mysql_db
+      WORDPRESS_DB_USER: db_user
+      WORDPRESS_DB_PASSWORD: db_passwd
+      WORDPRESS_DB_NAME: db_name
+      WORDPRESS_TABLE_PREFIX: wp_name
+    # The volume to store the wordpress config files
+    volumes:
+      - wordpress:/var/www/html
+    # Proxy = connection to the reverse-proxy handler traefik, wordpress_backend = a private connection to the database container
+    networks:
+      - proxy
+      - wordpress_backend
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.http.routers.wordpress.rule: "Host(`example.com`)"
+        # traefik.http.routers.wordpress.middlewares:
+        traefik.http.routers.wordpress.entrypoints: websecure
+        traefik.http.routers.wordpress.tls: "true"
+        traefik.http.services.wordpress.loadbalancer.server.port: 80
+        traefik.http.routers.wordpress.tls.certresolver: leresolver
+      # Replicas so the server will be able to balance the load over multiple containers
+      replicas: 2
+      placement:
+        constraints:
+        # Only putting the containers on the worknode to increase resource performance
+          - node.role == worker
+
+  mysql_db:
+    image: mysql:5.7  # mysql version 5.7 since the latest version (8.x) uses a higher authentication version that cant be used by wordpress
+    environment:
+      # The same environment values as the mysql database so it auto connects on creation
+      MYSQL_DATABASE: db_name
+      MYSQL_USER: db_user
+      MYSQL_PASSWORD: db_passwd
+      MYSQL_ROOT_PASSWORD: some_random_password_or_secret
+    volumes:
+      - mysql_db_data:/var/lib/mysql
+    networks:
+      - wordpress_backend
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker

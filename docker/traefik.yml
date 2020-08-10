@@ -1,0 +1,82 @@
+# To install traefik, do the following (change username, password and <name>):
+# docker network create --attachable -d overlay proxy
+
+# in your traefik directory > mkdir letsencrypt && \
+# touch letsencrypt/acme.json && \
+# chmod 600 letsencrypt/acme.json && \
+# mkdir new && echo "$(htpasswd -nb username password)" >> new/users.txt
+
+# docker-compose up -d
+
+# docker stop traefik_traefik_1
+
+# docker rm traefik_traefik_1
+
+# docker stack deploy -c simple_traefik.yml <name>
+
+# Access the GUI through 'traefik.your.domain'
+
+version: "3.8"
+
+networks:
+  proxy:
+    external: true
+
+volumes:
+  letsencrypt:
+  traefik.log:
+
+services:
+  traefik:
+    image: traefik:2.0.2
+    networks:
+      - proxy
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=traefik-public
+      # Swarm
+      - --providers.docker.swarmMode=true
+      # Enables web UI and tells Traefik to listen to docker
+      - --providers.docker
+      - --api
+      # Let's Encrypt
+      - --certificatesresolvers.leresolver.acme.email=your-mail
+      - --certificatesresolvers.leresolver.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.leresolver.acme.tlschallenge=true
+      # Logging
+      - --log.level=DEBUG
+      - --log.filePath=/traefik.log
+      - --log.format=json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - ./logs/traefik.log:/traefik.log
+      - ./new/users.txt:/new/users
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        traefik.enable: "true"
+        # Dashboard
+        traefik.http.routers.traefik.rule: "Host(`traefik.re-syst.org`)"
+        traefik.http.routers.traefik.service: api@internal
+        traefik.http.routers.traefik.tls.certresolver: leresolver
+        traefik.http.routers.traefik.entrypoints: websecure
+        traefik.http.routers.traefik.middlewares: auth-traefik
+        # Swarm Mode
+        traefik.http.services.traefik.loadbalancer.server.port: 80
+        # Basic Auth
+        traefik.http.middlewares.auth-traefik.basicauth.usersfile: /new/users
+        # Global http to https redirect
+        traefik.http.routers.http-catchall.rule: "hostregexp(`{host:.+}`)"
+        traefik.http.routers.http-catchall.entrypoints: web
+        traefik.http.routers.http-catchall.middlewares: redirect-to-https
+        # Middleware redirect
+        traefik.http.middlewares.redirect-to-https.redirectscheme.scheme: https

@@ -1,0 +1,109 @@
+# Full credits to https://github.com/BretFisher/dogvscat/blob/master/stack-proxy.yml for the following code
+# This is a traefik stack to run through a HAProxy docker container so traefik can watch the docker daemon without compromising
+# security. For more info, check https://blastorios.dev
+
+# Start with: docker network create --attachable -d overlay proxy
+
+# docker-compose up -d
+
+# docker stop <container_name>
+
+# docker stack deploy -c traefik_socketProtection.yml <service_name>
+
+version: '3.8'
+
+volumes:
+  letsencrypt:
+  traefik.log:
+
+networks:
+  proxy:
+    external: true
+  traefik-docker:
+    driver: overlay
+    driver_opts:
+      encrypted: 'true'
+
+
+x-default-opts: 
+  &default-opts
+  logging:
+    options:
+      max-size: "1m"
+
+services:
+
+  dockersocket:
+      <<: *default-opts
+      image: tecnativa/docker-socket-proxy
+      networks:
+        - traefik-docker
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+      environment:
+        # CONTAINERS: 1
+        # SWARM: 1
+        NETWORKS: 1
+        SERVICES: 1
+        TASKS: 1
+      deploy:
+        placement:
+          constraints: 
+            - node.role == manager
+
+  traefik:
+    <<: *default-opts
+    image: traefik:2.0.2
+    depends_on:
+      - dockersocket
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - ./logs/traefik.log:/traefik.log
+      - ./new/users.txt:/new/users
+    networks:
+      - proxy
+      - traefik-docker
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=traefik-public
+      # Swarm
+      - --providers.docker.swarmMode=true
+      # Enables web UI and tells Traefik to listen to docker
+      - --providers.docker
+      - --api
+      # Let's Encrypt
+      - --certificatesresolvers.leresolver.acme.email=zwiggelaar.jordi@gmail.com
+      - --certificatesresolvers.leresolver.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.leresolver.acme.tlschallenge=true
+      # Logging
+      - --log.level=DEBUG
+      - --log.filePath=/traefik.log
+      - --log.format=json
+      
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+        labels:
+          traefik.enable: "true"
+          # Dashboard
+          traefik.http.routers.traefik.rule: "Host(`traefik.example.com`)"
+          traefik.http.routers.traefik.service: api@internal
+          traefik.http.routers.traefik.tls.certresolver: leresolver
+          traefik.http.routers.traefik.entrypoints: websecure
+          traefik.http.routers.traefik.middlewares: auth-traefik
+          # Swarm Mode
+          traefik.http.services.traefik.loadbalancer.server.port: 80
+          # Basic Auth
+          traefik.http.middlewares.auth-traefik.basicauth.usersfile: /new/users
+          # Global http to https redirect
+          traefik.http.routers.http-catchall.rule: "hostregexp(`{host:.+}`)"
+          traefik.http.routers.http-catchall.entrypoints: web
+          traefik.http.routers.http-catchall.middlewares: redirect-to-https
+          # Middleware redirect
+          traefik.http.middlewares.redirect-to-https.redirectscheme.scheme: https
