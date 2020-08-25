@@ -75,6 +75,15 @@ else
         echo "Already changed rootlogin?... Nice!" && sleep 1
 fi
 ##Changing the ufw rules
+while true; do
+        read -p "Do you want to keep the docker swarm ports open? (y/n): " yn
+        case $yn in
+                [Yy]* ) ; break;;
+                [Nn]* ) ; break;;
+                * ) echo "Please answer with y or n.";;
+        esac
+done
+
 ufw default allow outgoing && ufw default deny incoming
 ufw allow 80 && ufw allow 443 && ufw allow 8080 && ufw allow 9001:9013/tcp && ufw allow $sshportnumber
 echo "Added all the ufw rules..." && sleep 2
@@ -141,7 +150,7 @@ if [ $(grep -w $inputname /etc/group | wc -l) > 0 ] ; then
         reboot_func
 else
         echo "Alright, do not forget to regularly update" && sleep 2
-        echo "This was the end of the script, be sure to check Blastor1os on GitHub" && sleep 2
+        echo "This was the end of the script, be sure to check Blastorios on GitHub" && sleep 2
         echo "Done..." && sleep 2
         break
 fi
